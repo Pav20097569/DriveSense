@@ -176,11 +176,10 @@ class CanInterface:
         self.default_timeout = 2.0
         self.active_dtcs = []
         
-        # Connection attempt order: Physical CAN -> Virtual CAN in CANoe -> Python virtual
+        # Connection attempt order: Physical CAN -> Virtual CAN in CANoe
         connection_attempts = [
-            {"type": "physical", "interface": "vector", "channel": 0, "bitrate": 500000},
-            {"type": "virtual", "interface": "vector", "channel": 0, "bitrate": 500000},
-            {"type": "fallback", "interface": "virtual", "channel": 1, "bitrate": 500000}
+            {"type": "physical", "interface": "vector", "channel": 2, "bitrate": 500000},
+            {"type": "virtual", "interface": "vector", "channel": 1, "bitrate": 500000},
         ]
         
         for attempt in connection_attempts:
@@ -365,9 +364,17 @@ if __name__ == "__main__":
         
         # Display initial DTCs
         print("\nInitial DTCs:")
-        for dtc in can_if._read_dtcs():
+        for dtc in can_if.read_dtcs():
             print(f"- {dtc['code']}: {dtc['description']}")
         
+
+        # Enter extended diagnostic session
+        can_if.send_isotp_message(0x7E0, bytes([0x10, 0x03]), 0x7E8)
+        time.sleep(0.1)  # Give a moment for ECU to switch sessions
+
+        # Then send the DID request
+        can_if.send_isotp_message(0x7E0, bytes([0x22, 0xF1, 0x90]), 0x7E8)
+
         # Test ISO-TP communication
         print("\nTesting ISO-TP communication...")
         request_data = bytes([0x22, 0xF1, 0x90])  # UDS request for DID F190
@@ -377,13 +384,13 @@ if __name__ == "__main__":
             response_arb_id=0x7E8,
             timeout=2.0
         )
-        
+
         print(f"Received response: {response.hex() if response else 'None'}")
         
         # Simulate new DTC
         can_if.simulate_new_dtc('P0123')
         print("\nAfter adding P0123:")
-        for dtc in can_if._read_dtcs():
+        for dtc in can_if.read_dtcs():
             print(f"- {dtc['code']}: {dtc['description']}")
         
         # Clear DTCs
