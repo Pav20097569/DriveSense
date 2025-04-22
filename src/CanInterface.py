@@ -176,16 +176,32 @@ class CanInterface:
         self.default_timeout = 2.0
         self.active_dtcs = []
         
-        try:
-            self.bus = can.Bus(interface="vector", channel=0, bitrate=500000)
-            self.connected = True
-            print("Successfully connected to Vector CAN interface")
-        except Exception as e:
-            print(f"Warning: Could not initialize Vector interface: {e}")
-            print("Falling back to virtual interface")
-            self.bus = can.Bus(interface="virtual", channel=0, bitrate=500000)
- 
-    
+        # Connection attempt order: Physical CAN -> Virtual CAN in CANoe -> Python virtual
+        connection_attempts = [
+            {"type": "physical", "interface": "vector", "channel": 0, "bitrate": 500000},
+            {"type": "virtual", "interface": "vector", "channel": 0, "bitrate": 500000},
+            {"type": "fallback", "interface": "virtual", "channel": 1, "bitrate": 500000}
+        ]
+        
+        for attempt in connection_attempts:
+            try:
+                print(f"Attempting {attempt['type']} connection...")
+                self.bus = can.Bus(
+                    interface=attempt['interface'],
+                    channel=attempt['channel'],
+                    bitrate=attempt['bitrate'],
+                    receive_own_messages=True
+                )
+                self.connected = True
+                print(f"Successfully connected to {attempt['type']} CAN interface")
+                break
+            except Exception as e:
+                print(f"Failed {attempt['type']} connection: {str(e)}")
+                continue
+        
+        if not self.connected:
+            print("Warning: Could not connect to any CAN interface")
+
     def is_connected(self):
         return self.connected
     
@@ -244,13 +260,32 @@ class CanInterface:
                     'speed': msg.data[2] if len(msg.data) >= 3 else 0,
                     'temp': msg.data[3] if len(msg.data) >= 4 else 0,
                     'fuel': msg.data[4] if len(msg.data) >= 5 else 0,
-                    'dtcs': self._read_dtcs()
+                    'dtcs': self.read_dtcs()  # Changed from _read_dtcs to read_dtcs
                 }
             return None
         except Exception as e:
             print(f"Error reading CAN data: {e}")
             self.connected = False
             return None
+    
+    def _convert_raw_dtc(self, dtc_raw):
+        """Convert raw DTC value to string code (e.g., P0123)"""
+        # First two bits represent the letter (P, C, B, or U)
+        letter_code = (dtc_raw >> 14) & 0x03
+        letters = ['P', 'C', 'B', 'U']
+        letter = letters[letter_code]
+        
+        # Next 6 bits represent the first digit
+        digit1 = (dtc_raw >> 12) & 0x03
+        
+        # Following 4 bits represent the second digit
+        digit2 = (dtc_raw >> 8) & 0x0F
+        
+        # Last 8 bits represent the third and fourth digits
+        digit3 = (dtc_raw >> 4) & 0x0F
+        digit4 = dtc_raw & 0x0F
+        
+        return f"{letter}{digit1}{digit2}{digit3}{digit4}"
     
     def read_dtcs(self):
         """Read Diagnostic Trouble Codes with descriptions"""
@@ -283,7 +318,6 @@ class CanInterface:
             print(f"Error reading DTCs: {e}")
             return []
 
-
     def clear_dtcs(self):
         """Clear Diagnostic Trouble Codes"""
         try:
@@ -306,7 +340,6 @@ class CanInterface:
             print(f"Error clearing DTCs: {e}")
             return False
 
-
     def simulate_new_dtc(self, dtc_code):
         """Simulate a new DTC appearing (for testing)"""
         if dtc_code not in self.active_dtcs:
@@ -323,7 +356,6 @@ class CanInterface:
         if self.bus:
             self.bus.shutdown()
             print("CAN interface shutdown")
-
 
 if __name__ == "__main__":
     # Test the interface with DTC functionality
@@ -345,6 +377,7 @@ if __name__ == "__main__":
             response_arb_id=0x7E8,
             timeout=2.0
         )
+        
         print(f"Received response: {response.hex() if response else 'None'}")
         
         # Simulate new DTC
