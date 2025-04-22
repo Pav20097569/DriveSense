@@ -1,4 +1,5 @@
 import sys
+import random
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
                             QPushButton, QLCDNumber)
@@ -32,9 +33,10 @@ class VehicleDashboard(QMainWindow):
         self.update_connection_status()
 
     def setup_gauges(self, parent_layout):
-        """Create live data gauges"""
+        """Create live data gauges with enhanced visualization"""
         gauge_panel = QWidget()
         layout = QVBoxLayout()
+        layout.setSpacing(15)
         
         # Connection status
         self.connection_status = QLabel()
@@ -45,19 +47,38 @@ class VehicleDashboard(QMainWindow):
         # RPM Gauge
         rpm_box = QWidget()
         rpm_layout = QHBoxLayout()
-        rpm_layout.addWidget(QLabel("RPM:"))
+        rpm_label = QLabel("RPM:")
+        rpm_label.setToolTip("Engine revolutions per minute")
+        rpm_layout.addWidget(rpm_label)
         self.rpm_display = QLCDNumber()
         self.rpm_display.setDigitCount(5)
+        self.rpm_display.setToolTip("Current engine RPM")
+        self.rpm_display.setStyleSheet("""
+            QLCDNumber {
+                background-color: black;
+                color: green;
+            }
+            QLCDNumber[valueWarning="true"] {
+                color: orange;
+            }
+            QLCDNumber[valueCritical="true"] {
+                color: red;
+            }
+        """)
         rpm_layout.addWidget(self.rpm_display)
         rpm_box.setLayout(rpm_layout)
         
         # Speed Gauge
         speed_box = QWidget()
         speed_layout = QHBoxLayout()
-        speed_layout.addWidget(QLabel("Speed:"))
+        speed_label = QLabel("Speed:")
+        speed_label.setToolTip("Vehicle speed")
+        speed_layout.addWidget(speed_label)
         self.speed_display = QLCDNumber()
         self.speed_display.setDigitCount(3)
+        self.speed_display.setToolTip("Current vehicle speed")
         speed_layout.addWidget(self.speed_display)
+        speed_layout.addWidget(QLabel("km/h"))
         speed_box.setLayout(speed_layout)
         
         # Other parameters
@@ -74,14 +95,22 @@ class VehicleDashboard(QMainWindow):
         parent_layout.addWidget(gauge_panel)
 
     def create_parameter_display(self, name, unit):
-        """Helper for creating parameter displays"""
+        """Helper for creating parameter displays with tooltips"""
         box = QWidget()
         layout = QHBoxLayout()
-        layout.addWidget(QLabel(f"{name}:"))
+        label = QLabel(f"{name}:")
+        label.setToolTip(f"Live {name} measurement")
+        layout.addWidget(label)
+        
         display = QLCDNumber()
         display.setDigitCount(6)
+        display.setToolTip(f"Current {name} value")
         layout.addWidget(display)
-        layout.addWidget(QLabel(unit))
+        
+        unit_label = QLabel(unit)
+        unit_label.setToolTip("Measurement unit")
+        layout.addWidget(unit_label)
+        
         box.setLayout(layout)
         return box
 
@@ -114,14 +143,31 @@ class VehicleDashboard(QMainWindow):
             return
             
         try:
-            self.rpm_display.display(can_data.get('rpm', 0))
+            # Update RPM with warning thresholds
+            rpm = can_data.get('rpm', 0)
+            self.rpm_display.display(rpm)
+            if rpm > 3000:
+                self.rpm_display.setProperty("valueWarning", "true")
+            else:
+                self.rpm_display.setProperty("valueWarning", "false")
+            
             self.speed_display.display(can_data.get('speed', 0))
             
             temp_lcd = self.temp_display.findChild(QLCDNumber)
-            temp_lcd.display(can_data.get('temp', 0))
+            temp = can_data.get('temp', 0)
+            temp_lcd.display(temp)
+            if temp > 100:
+                temp_lcd.setProperty("valueWarning", "true")
+            else:
+                temp_lcd.setProperty("valueWarning", "false")
             
             fuel_lcd = self.fuel_display.findChild(QLCDNumber)
-            fuel_lcd.display(can_data.get('fuel', 0))
+            fuel = can_data.get('fuel', 0)
+            fuel_lcd.display(fuel)
+            if fuel < 15:
+                fuel_lcd.setProperty("valueWarning", "true")
+            else:
+                fuel_lcd.setProperty("valueWarning", "false")
             
             if 'dtcs' in can_data:
                 self.update_dtc_table(can_data['dtcs'])
@@ -148,6 +194,9 @@ class VehicleDashboard(QMainWindow):
         self.dtc_table = QTableWidget()
         self.dtc_table.setColumnCount(3)
         self.dtc_table.setHorizontalHeaderLabels(["Code", "Description", "Status"])
+        self.dtc_table.horizontalHeader().setStretchLastSection(True)
+        self.dtc_table.setColumnWidth(0, 100)
+        self.dtc_table.setColumnWidth(1, 300)
         layout.addWidget(self.dtc_table)
         
         btn_layout = QHBoxLayout()
@@ -180,12 +229,17 @@ class VehicleDashboard(QMainWindow):
             self.dtc_table.setItem(0, 2, QTableWidgetItem("Offline"))
 
     def update_dtc_table(self, dtcs):
-        """Update DTC table with codes"""
+        """Update DTC table with codes and severity coloring"""
         self.dtc_table.setRowCount(len(dtcs))
         for row, dtc in enumerate(dtcs):
             self.dtc_table.setItem(row, 0, QTableWidgetItem(dtc["code"]))
             self.dtc_table.setItem(row, 1, QTableWidgetItem(dtc["desc"]))
+            
             status_item = QTableWidgetItem(dtc.get("status", "Active"))
+            if dtc.get("severity") == "High":
+                status_item.setBackground(QColor(255, 100, 100))  # Light red
+            elif dtc.get("severity") == "Medium":
+                status_item.setBackground(QColor(255, 200, 100))  # Orange
             self.dtc_table.setItem(row, 2, status_item)
 
 class Display(QObject):
@@ -210,12 +264,38 @@ class Display(QObject):
         palette = self.app.palette()
         palette.setColor(palette.Window, QColor(53, 53, 53))
         palette.setColor(palette.WindowText, Qt.white)
+        palette.setColor(palette.Base, QColor(25, 25, 25))
+        palette.setColor(palette.AlternateBase, QColor(53, 53, 53))
+        palette.setColor(palette.ToolTipBase, Qt.white)
+        palette.setColor(palette.ToolTipText, Qt.white)
+        palette.setColor(palette.Text, Qt.white)
+        palette.setColor(palette.Button, QColor(53, 53, 53))
+        palette.setColor(palette.ButtonText, Qt.white)
+        palette.setColor(palette.BrightText, Qt.red)
+        palette.setColor(palette.Highlight, QColor(142, 45, 197).lighter())
+        palette.setColor(palette.HighlightedText, Qt.black)
         self.app.setPalette(palette)
+        self.app.setStyleSheet("""
+            QToolTip { 
+                color: #ffffff; 
+                background-color: #2a82da; 
+                border: 1px solid white; 
+            }
+        """)
     
     def update_data(self, can_data):
         """Update dashboard with data"""
-        self.dashboard.can_connected = can_data.get('connected', False)
-        self.dashboard.update_data(can_data)
+        try:
+            self.dashboard.can_connected = can_data.get('connected', False)
+            if not self.dashboard.can_connected:
+                self.dashboard.show_service_unavailable()
+                return
+                
+            self.dashboard.update_data(can_data)
+        except Exception as e:
+            print(f"Dashboard update error: {e}")
+            self.dashboard.can_connected = False
+            self.dashboard.show_service_unavailable()
     
     def run(self):
         """Start the application"""
@@ -223,6 +303,22 @@ class Display(QObject):
         sys.exit(self.app.exec_())
 
 if __name__ == "__main__":
-    display = Display()
-
+    # Example usage with mock data
+    display = Display(can_connected=True)
+    
+    # Simulate data updates
+    timer = QTimer()
+    timer.timeout.connect(lambda: display.update_data({
+        'connected': True,
+        'rpm': random.randint(800, 4000),
+        'speed': random.randint(0, 120),
+        'temp': random.randint(80, 110),
+        'fuel': random.randint(10, 100),
+        'dtcs': [
+            {"code": "P0172", "desc": "System too rich", "status": "Active", "severity": "Medium"},
+            {"code": "P0300", "desc": "Random misfire", "status": "Pending", "severity": "High"}
+        ]
+    }))
+    timer.start(1000)
+    
     display.run()
