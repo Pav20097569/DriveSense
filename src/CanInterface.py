@@ -1,5 +1,6 @@
 import can
 from can import Message
+from can.interfaces.vector import canlib
 import time
 from collections import deque
 
@@ -175,28 +176,57 @@ class CanInterface:
         self.pending_requests = {}
         self.default_timeout = 2.0
         self.active_dtcs = []
-        
-        # Connection attempt order: Physical CAN -> Virtual CAN in CANoe
+
+        # First check available channels
+        try:
+            from can.interfaces.vector import VectorBus
+            print("Available Vector channels:", VectorBus.get_available_channels())
+        except Exception as e:
+            print(f"Couldn't check available channels: {e}")
+
+        # Connection attempts in order of preference
         connection_attempts = [
-            {"type": "physical", "interface": "vector", "channel": 2, "bitrate": 500000},
-            {"type": "virtual", "interface": "vector", "channel": 1, "bitrate": 500000},
+            {"type": "virtual", "interface": "vector", "channel": 1, "bitrate": 500000, "app_name": "CANoe"},
+            {"type": "virtual", "interface": "vector", "channel": 2, "bitrate": 500000, "app_name": "CANoe"},
+            {"type": "physical", "interface": "vector", "channel": 0, "bitrate": 500000,"app_name": "CANoe"},
+            {"type": "physical", "interface": "vector", "channel": 1, "bitrate": 500000,"app_name": "CANoe"},
+            {"type": "auto", "interface": "vector", "channel": -1, "bitrate": 500000,"app_name": "CANoe"},
         ]
-        
+
         for attempt in connection_attempts:
             try:
-                print(f"Attempting {attempt['type']} connection...")
-                self.bus = can.Bus(
-                    interface=attempt['interface'],
-                    channel=attempt['channel'],
-                    bitrate=attempt['bitrate'],
-                    receive_own_messages=True
-                )
+                print(f"\nAttempting {attempt['type']} connection on channel {attempt['channel']}...")
+
+                config = {
+                    "interface": attempt["interface"],
+                    "channel": attempt["channel"],
+                    "bitrate": attempt["bitrate"],
+                    "receive_own_messages": True
+                }
+
+                if "app_name" in attempt:
+                    config["app_name"] = attempt["app_name"]
+
+                self.bus = can.Bus(**config)
                 self.connected = True
                 print(f"Successfully connected to {attempt['type']} CAN interface")
+                print(f"Using channel: {attempt['channel']}")
                 break
+
+            except can.CanError as e:
+                print(f"CAN connection failed: {str(e)}")
             except Exception as e:
-                print(f"Failed {attempt['type']} connection: {str(e)}")
-                continue
+                print(f"General connection error: {str(e)}")
+
+        if not self.connected:
+            print("\nWarning: Could not connect to any CAN interface")
+            print("Possible solutions:")
+            print("1. Make sure CANoe is running with your configuration")
+            print("2. Check Vector Hardware Config for channel assignments")
+            print("3. Verify your hardware is properly connected")
+            print("4. Try running as Administrator")
+
+
         
         if not self.connected:
             print("Warning: Could not connect to any CAN interface")

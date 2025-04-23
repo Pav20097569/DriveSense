@@ -1,6 +1,7 @@
 import can
 try:
-    bus = can.interface.Bus(bustype='vector', channel=0)
+ 
+    bus = can.Bus(type = 'virtual' ,interface='vector', channel=0, bitrate=500000)
     print("Successfully connected to channel 0")
     bus.shutdown()
 except Exception as e:
